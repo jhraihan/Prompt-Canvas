@@ -1,0 +1,58 @@
+# Dependency updates.
+#
+# Everything here is pinned to an exact version, which is right for
+# reproducibility but means nothing moves without a deliberate bump. Dependabot
+# is what surfaces those bumps instead of letting them silently age.
+#
+# CI is the safety net: a Dependabot PR runs the full suite, the coverage
+# floor, both linters, and the audit before it can be merged.
+
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "backend"]
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    groups:
+      # One PR for the routine patch churn; anything larger arrives on its own
+      # so it gets read properly.
+      patch-updates:
+        patterns: ["*"]
+        update-types: ["patch"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "frontend"]
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    groups:
+      patch-updates:
+        patterns: ["*"]
+        update-types: ["patch"]
+      # React and its DOM package must move together.
+      react:
+        patterns: ["react", "react-dom", "@types/react*"]
+      testing:
+        patterns: ["vitest", "@vitest/*", "@testing-library/*", "jsdom"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"

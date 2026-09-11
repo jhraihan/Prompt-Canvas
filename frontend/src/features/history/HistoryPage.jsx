@@ -1,0 +1,365 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { Alert } from "../../components/ui/Alert";
+import { Button } from "../../components/ui/Button";
+import { Dialog } from "../../components/ui/Dialog";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { ImageIcon, SparkIcon, TrashIcon } from "../../components/ui/Icons";
+import { Skeleton } from "../../components/ui/Skeleton";
+import { useToast } from "../../components/ui/Toast";
+import { ApiError, api } from "../../lib/api";
+import { truncate } from "../../lib/format";
+import { HistoryCard } from "./HistoryCard";
+import { ShareDialog } from "./ShareDialog";
+import { ImagePreviewDialog } from "./ImagePreviewDialog";
+
+const PAGE_SIZE = 12;
+
+export function HistoryPage() {
+  const navigate = useNavigate();
+  const { notify } = useToast();
+
+  const [images, setImages] = useState([]);
+  const [count, setCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [state, setState] = useState("loading");
+  const [loadError, setLoadError] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const [preview, setPreview] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  const [selected, setSelected] = useState(() => new Set());
+  const [selecting, setSelecting] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const [sharing, setSharing] = useState(null);
+
+  const notifyRef = useRef(notify);
+  useEffect(() => {
+    notifyRef.current = notify;
+  }, [notify]);
+
+  const load = useCallback(async (targetPage, append, { showSpinner = true } = {}) => {
+
+    if (append) setLoadingMore(true);
+    else if (showSpinner) setState("loading");
+    setLoadError(null);
+
+    try {
+      const result = await api.history(targetPage, PAGE_SIZE);
+      setImages((current) => (append ? [...current, ...result.results] : result.results));
+      setCount(result.count);
+      setHasMore(Boolean(result.next));
+      setPage(targetPage);
+      setState("ready");
+    } catch (caught) {
+      const message =
+        caught instanceof ApiError
+          ? caught.message
+          : "Could not load your history. Please try again.";
+      if (append) {
+        notifyRef.current(message, "info");
+      } else {
+        setLoadError(message);
+        setState("error");
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, []);
+
+  useEffect(() => {
+
+    // oxlint-disable-next-line react/set-state-in-effect
+    void load(1, false, { showSpinner: false });
+  }, [load]);
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.remove(pendingDelete.id);
+      setImages((current) => current.filter((image) => image.id !== pendingDelete.id));
+      setCount((current) => Math.max(0, current - 1));
+      setPendingDelete(null);
+      notify("Image deleted.");
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof ApiError
+          ? caught.message
+          : "Could not delete that image. Please try again.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function toggleSelected(image) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(image.id)) next.delete(image.id);
+      else next.add(image.id);
+      return next;
+    });
+  }
+
+  function exitSelection() {
+    setSelecting(false);
+    setSelected(new Set());
+  }
+
+  async function confirmBulkDelete() {
+    setBulkDeleting(true);
+    try {
+      const ids = [...selected];
+      const result = await api.removeMany(ids);
+      setImages((current) => current.filter((image) => !selected.has(image.id)));
+      setCount((current) => Math.max(0, current - result.deleted));
+      setConfirmBulk(false);
+      exitSelection();
+      notify(`${result.deleted} image${result.deleted === 1 ? "" : "s"} deleted.`);
+    } catch {
+      notify("Could not delete those images. Please try again.", "info");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  function regenerate(image) {
+    navigate("/", {
+      state: { prompt: image.prompt, size: image.size, quality: image.quality },
+    });
+  }
+
+  return (
+    <>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold leading-[1.05] tracking-[-0.03em] text-ink">
+            Your <span className="pc-gradient-text">gallery</span>
+          </h1>
+          <p className="mt-2.5 text-base text-ink-secondary">
+            {state === "ready" && count > 0
+              ? `${count} image${count === 1 ? "" : "s"} generated by you.`
+              : "Every image you generate is saved here."}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {state === "ready" && images.length > 0 && (
+            <Button
+              variant={selecting ? "primary" : "secondary"}
+              onClick={() => (selecting ? exitSelection() : setSelecting(true))}
+            >
+              {selecting ? "Done" : "Select"}
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            onClick={() => navigate("/")}
+            icon={<SparkIcon size={16} />}
+          >
+            Generate a new image
+          </Button>
+        </div>
+      </div>
+
+      {state === "loading" && <HistorySkeleton />}
+
+      {state === "error" && (
+        <Alert
+          tone="error"
+          title="Could not load your history."
+          action={
+            <Button size="sm" variant="secondary" onClick={() => void load(1, false)}>
+              Try again
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      )}
+
+      {state === "ready" && images.length === 0 && (
+        <div className="rounded-xl border border-line bg-surface">
+          <EmptyState
+            icon={<ImageIcon size={20} />}
+            title="No images yet"
+            description="Generated images appear here with their prompt, so you can download or regenerate them any time."
+            action={
+              <Button variant="primary" onClick={() => navigate("/")} icon={<SparkIcon size={16} />}>
+                Generate your first image
+              </Button>
+            }
+          />
+        </div>
+      )}
+
+      {selecting && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-inset px-3.5 py-2.5">
+          <span className="text-sm text-ink-secondary">
+            <span className="font-medium text-ink tabular-nums">{selected.size}</span>{" "}
+            selected
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setSelected(new Set(images.map((image) => image.id)))}
+              disabled={selected.size === images.length}
+            >
+              Select all
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => setConfirmBulk(true)}
+              disabled={selected.size === 0}
+              icon={<TrashIcon size={15} />}
+            >
+              Delete selected
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {state === "ready" && images.length > 0 && (
+        <>
+          <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {images.map((image) => (
+              <li key={image.id}>
+                <HistoryCard
+                  image={image}
+                  onPreview={setPreview}
+                  onDelete={setPendingDelete}
+                  onRegenerate={regenerate}
+                  onShare={setSharing}
+                  selecting={selecting}
+                  selected={selected.has(image.id)}
+                  onToggleSelected={toggleSelected}
+                />
+              </li>
+            ))}
+          </ul>
+
+          {hasMore && (
+            <div className="mt-6 flex justify-center">
+              <Button
+                variant="secondary"
+                onClick={() => void load(page + 1, true)}
+                loading={loadingMore}
+                loadingLabel="Loading..."
+              >
+                Load more
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+
+      <ImagePreviewDialog image={preview} onClose={() => setPreview(null)} />
+
+            <ShareDialog
+        key={sharing?.id ?? "none"}
+        image={sharing}
+        onClose={() => setSharing(null)}
+      />
+
+      <Dialog
+        open={confirmBulk}
+        onClose={() => setConfirmBulk(false)}
+        busy={bulkDeleting}
+        title={`Delete ${selected.size} image${selected.size === 1 ? "" : "s"}?`}
+        description="This permanently removes them and their prompts. It cannot be undone."
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmBulk(false)}
+              disabled={bulkDeleting}
+            >
+              Keep them
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => void confirmBulkDelete()}
+              loading={bulkDeleting}
+              loadingLabel="Deleting..."
+              icon={<TrashIcon size={16} />}
+            >
+              Delete {selected.size}
+            </Button>
+          </>
+        }
+      />
+
+      <Dialog
+        open={Boolean(pendingDelete)}
+        onClose={() => {
+          setPendingDelete(null);
+          setDeleteError(null);
+        }}
+        busy={deleting}
+        title="Delete this image?"
+        description="This permanently removes the image and its prompt from your history. It cannot be undone."
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setPendingDelete(null)}
+              disabled={deleting}
+            >
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => void confirmDelete()}
+              loading={deleting}
+              loadingLabel="Deleting..."
+              icon={<TrashIcon size={16} />}
+            >
+              Delete image
+            </Button>
+          </>
+        }
+      >
+        {pendingDelete && (
+          <p className="text-sm text-ink-secondary">
+            "{truncate(pendingDelete.prompt, 140)}"
+          </p>
+        )}
+        {deleteError && (
+          <Alert tone="error" className="mt-3">
+            {deleteError}
+          </Alert>
+        )}
+      </Dialog>
+    </>
+  );
+}
+
+function HistorySkeleton() {
+  return (
+    <div
+      className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      role="status"
+      aria-label="Loading your history"
+    >
+      {Array.from({ length: 8 }).map((_, index) => (
+        <div key={index} className="overflow-hidden rounded-xl border border-line bg-surface">
+          <Skeleton className="aspect-square w-full" rounded="md" />
+          <div className="flex flex-col gap-2 p-3.5">
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className="h-3.5 w-4/5" />
+            <Skeleton className="mt-1 h-8 w-32" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

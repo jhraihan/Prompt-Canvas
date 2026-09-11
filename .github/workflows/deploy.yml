@@ -1,0 +1,226 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deploys overlap. In-progress runs finish rather than being
+# cancelled, so a half-applied migration cannot happen.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  # Set these as GitHub repository *variables* (Settings -> Secrets and
+  # variables -> Actions -> Variables), not literals. They are public values
+  # -- the API origin is compiled into the client bundle regardless -- but
+  # keeping them out of the tree means a fork or a new environment needs no
+  # code change.
+  API_ORIGIN: ${{ vars.API_ORIGIN }}
+  APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Nothing deploys unless the whole suite is green.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: promptcanvas
+          POSTGRES_PASSWORD: promptcanvas
+          POSTGRES_DB: promptcanvas_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Backend tests
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          DJANGO_SECRET_KEY: ci-only-key-not-used-for-anything-real-0123456789
+          DATABASE_URL: postgres://promptcanvas:promptcanvas@localhost:5432/promptcanvas_test
+          CORS_ALLOWED_ORIGINS: http://localhost:5173
+        run: |
+          pip install -r requirements-dev.txt
+          python manage.py makemigrations --check --dry-run
+          python -m pytest -q
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+
+  # ---------------------------------------------------------------------------
+  # Backend -> Hostinger VPS over SSH.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Deploy backend to VPS
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.API_ORIGIN }}/api/health/
+
+    steps:
+      - name: Open an SSH session to the VPS
+        env:
+          # Every secret arrives as an environment variable rather than being
+          # interpolated into the script body: `${{ }}` is substituted as raw
+          # text before bash parses the line, so a secret containing shell
+          # metacharacters would otherwise execute.
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.VPS_HOST }}
+          SSH_PORT: ${{ secrets.VPS_PORT || '22' }}
+          SSH_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the host key so a DNS or routing hijack cannot silently
+          # redirect this deploy to another machine. Falling back to keyscan
+          # trusts whatever answers on the day, so set VPS_HOST_KEY.
+          if [ -n "$SSH_HOST_KEY" ]; then
+            printf '%s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
+          else
+            echo "::warning::VPS_HOST_KEY is not set; trusting the host on first contact."
+            ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run the deploy script on the VPS
+        env:
+          SSH_HOST: ${{ secrets.VPS_HOST }}
+          SSH_USER: ${{ secrets.VPS_USER }}
+          SSH_PORT: ${{ secrets.VPS_PORT || '22' }}
+          # bootstrap.sh installs the hook at ${SITE_HOME}/deploy.sh, so the
+          # path follows the site user rather than being a literal.
+          DEPLOY_SCRIPT: ${{ vars.DEPLOY_SCRIPT_PATH || '~/deploy.sh' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" \
+              -o BatchMode=yes -o ConnectTimeout=20 \
+              "$SSH_USER@$SSH_HOST" \
+              "bash -lc '${DEPLOY_SCRIPT}'"
+
+      - name: Verify the API is healthy
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+                   "${API_ORIGIN}/api/health/" || true)
+            if [ "$code" = "200" ]; then
+              echo "API healthy (HTTP 200)"
+              exit 0
+            fi
+            echo "Attempt ${attempt}: HTTP ${code}. Retrying in 10s."
+            sleep 10
+          done
+          echo "::error::API did not return 200 after the deploy."
+          exit 1
+
+      - name: Clean up the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  # ---------------------------------------------------------------------------
+  # Frontend -> Vercel.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Deploy frontend to Vercel
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.APP_ORIGIN }}
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    env:
+      # The Vercel CLI reads all three from the environment, so no secret ever
+      # reaches a shell command line -- where it could be word-split, logged by
+      # `set -x`, or exposed in a process listing.
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull the production environment
+        run: vercel pull --yes --environment=production
+
+      - name: Build
+        # VITE_API_BASE_URL comes from the Vercel project's environment
+        # variables, which `vercel pull` just fetched.
+        run: vercel build --prod
+
+      - name: Assert the API origin was baked in
+        # Vite substitutes import.meta.env at build time, so a missing variable
+        # does not fail the build -- it silently falls back to the localhost
+        # default in src/lib/api.js and ships a frontend that talks to nobody.
+        #
+        # The most common cause is the variable being marked "Sensitive" in
+        # Vercel: `vercel env pull` then returns the literal "[SENSITIVE]"
+        # instead of the value. An API origin is public (it ends up in the
+        # client bundle regardless), so it must be stored as non-sensitive.
+        run: |
+          if grep -rqF 'http://localhost:8000' .vercel/output/static/assets/*.js; then
+            echo "::error::Bundle fell back to http://localhost:8000. Check that VITE_API_BASE_URL is set and NOT marked Sensitive in the Vercel project."
+            exit 1
+          fi
+          if ! grep -rqF "${API_ORIGIN}" .vercel/output/static/assets/*.js; then
+            echo "::error::Bundle does not reference ${API_ORIGIN}."
+            exit 1
+          fi
+          echo "Bundle targets ${API_ORIGIN}"
+
+      - name: Deploy
+        run: vercel deploy --prebuilt --prod
+
+      - name: Verify the site is up
+        run: |
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$APP_ORIGIN" || true)
+            if [ "$code" = "200" ]; then
+              echo "Frontend healthy (HTTP 200)"
+              exit 0
+            fi
+            echo "Attempt ${attempt}: HTTP ${code}. Retrying in 10s."
+            sleep 10
+          done
+          echo "::error::${APP_ORIGIN} did not return 200 after the deploy."
+          exit 1

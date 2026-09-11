@@ -1,0 +1,68 @@
+# Pre-commit hooks for Prompt Canvas.
+#
+#   pip install pre-commit      (or: pipx install pre-commit)
+#   pre-commit install          once per clone -- wires the git hook
+#   pre-commit run --all-files  check everything now
+#
+# These run on `git commit` and catch what CI would catch, minutes earlier.
+# They are a convenience, not the gate: CI runs the same checks and is the
+# authority. Never use `git commit --no-verify` to get around a real failure.
+
+default_language_version:
+  python: python3.12
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.(svg|md)$'
+      - id: end-of-file-fixer
+        exclude: '\.(svg|pdf)$'
+      - id: check-yaml
+      - id: check-json
+        exclude: '^frontend/\.oxlintrc\.json$'  # allows comments
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      # A 500 kB ceiling: generated images and build output do not belong in
+      # git, and a large blob is usually a mistake that is painful to undo.
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      # The single most valuable hook here. A committed key is a rotation
+      # event, not a revert -- git history keeps it forever.
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args: ["--allow-missing-credentials"]
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: '^backend/'
+      - id: ruff-format
+        files: '^backend/'
+
+  - repo: local
+    hooks:
+      # Mirrors the CI secret scan. Note the placeholder in .env.example is
+      # `hf_` + 30 x's, which DOES match the length bound -- so template files
+      # are excluded by path, exactly as the CI job does with ':!*.example'.
+      - id: no-huggingface-token
+        name: no Hugging Face token committed
+        entry: >-
+          bash -c 'if git diff --cached -U0 -- . ":!*.example" | grep -qE
+          "^\+.*hf_[A-Za-z0-9]{30,}"; then
+          echo "A Hugging Face token appears in the staged diff."; exit 1; fi'
+        language: system
+        pass_filenames: false
+
+      - id: oxlint
+        name: oxlint (frontend)
+        entry: bash -c 'cd frontend && npm run --silent lint'
+        language: system
+        files: '^frontend/src/.*\.(js|jsx)$'
+        pass_filenames: false

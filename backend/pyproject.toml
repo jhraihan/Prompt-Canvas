@@ -1,0 +1,55 @@
+[project]
+name = "prompt-canvas-backend"
+version = "1.0.0"
+description = "Prompt Canvas — generate images from natural language prompts."
+requires-python = ">=3.12"
+authors = [{ name = "Md. Jahid Hasan Raihan", email = "hello.jahidhr@gmail.com" }]
+# No license declared yet. Note that without one the project is
+# all-rights-reserved by default: nobody may legally use, copy, or run it.
+# Add a `license` field and a LICENSE file before publishing.
+
+[tool.ruff]
+line-length = 90
+target-version = "py312"
+extend-exclude = [".venv", "migrations", "staticfiles", "media"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort -- import ordering
+    "B",    # flake8-bugbear -- likely bugs
+    "C4",   # flake8-comprehensions
+    "DJ",   # flake8-django
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit -- security
+    "RUF",  # ruff's own rules
+]
+ignore = [
+    # `assert` is how pytest works; S101 would fire on every test.
+    "S101",
+    # Django's own `null=True` guidance is contextual; DJ001 is noisy on
+    # fields where NULL is genuinely the right modelling choice.
+    "DJ001",
+    # `permission_classes = [...]`, `throttle_classes = [...]`, `fields = (...)`
+    # are DRF's and Django's documented class-attribute API. RUF012 would have
+    # us annotate every one with ClassVar, which is noise, not safety.
+    "RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Settings modules use star imports by design: each environment layers over
+# base, and enumerating every name would drift silently.
+"config/settings/*.py" = ["F403", "F405"]
+# Tests may use hardcoded passwords and bind to test hosts.
+"**/tests/*.py" = ["S105", "S106", "S107"]
+# The bootstrap command prints credentials guidance; not a secret literal.
+"accounts/management/commands/create_demo_user.py" = ["S105", "S106"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["accounts", "config", "images"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

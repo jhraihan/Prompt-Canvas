@@ -1,0 +1,46 @@
+# Prompt Canvas application server.
+#
+# This file is a TEMPLATE. deploy/bootstrap.sh substitutes the __PLACEHOLDER__
+# values and installs the result at /etc/systemd/system/promptcanvas-api.service.
+# Do not copy it by hand.
+
+[Unit]
+Description=Prompt Canvas Django API (gunicorn)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=notify
+User=__SITE_USER__
+Group=__SITE_USER__
+WorkingDirectory=__BACKEND__
+Environment=DJANGO_SETTINGS_MODULE=config.settings.prod
+EnvironmentFile=__BACKEND__/.env
+
+ExecStart=__VENV__/bin/gunicorn \
+    --workers 3 \
+    --threads 2 \
+    --timeout 180 \
+    --graceful-timeout 30 \
+    --bind 127.0.0.1:__PORT__ \
+    --access-logfile - \
+    --error-logfile - \
+    config.wsgi:application
+
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=3
+
+# --- Hardening -------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=__BACKEND__/media __BACKEND__/staticfiles
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

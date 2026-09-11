@@ -1,0 +1,77 @@
+name: Bug report
+description: Something behaves differently from how it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report a security vulnerability here.** A public issue is
+        visible to everyone, including anyone who would exploit it. See
+        [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, not what you think caused it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in
+        2. Enter the prompt "..."
+        3. Select Generate
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which image provider
+      description: The value of IMAGE_PROVIDER, or check /api/health/.
+      options:
+        - stub (offline placeholder)
+        - huggingface
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, browser, and Python/Node versions if the backend is involved.
+      placeholder: "Windows 11, Chrome 141, Python 3.12.0, Node 22.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >
+        Console errors, API responses, or server log lines. Redact any token
+        before pasting — this is rendered as code, no backticks needed.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this
+          required: true
+        - label: I have removed any credential from the text above
+          required: true

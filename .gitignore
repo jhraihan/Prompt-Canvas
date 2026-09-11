@@ -1,0 +1,67 @@
+# --- Secrets --------------------------------------------------------------
+# Never commit a real environment file. `.env.example` is the template.
+.env
+.env.*
+!.env.example
+!.env.development
+*.pem
+*.key
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- Django ---------------------------------------------------------------
+backend/media/
+backend/staticfiles/
+!backend/staticfiles/.gitkeep
+*.sqlite3
+*.log
+
+# --- Playwright -----------------------------------------------------------
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
+backend/e2e.sqlite3
+
+# --- Node -----------------------------------------------------------------
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# --- Editors and OS -------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- Vercel ---------------------------------------------------------------
+.vercel
+
+# --- Local tooling --------------------------------------------------------
+# Agent/editor settings can capture host names, IPs, and SSH invocations.
+.claude/
+CLAUDE.md
+
+# --- Local working files --------------------------------------------------
+# Screenshots and scratch output from development sessions.
+/*.png
+/*.jpg
+*.mjs
+
+# --- Build artifacts ------------------------------------------------------
+# Generated from the markdown source; rebuild rather than commit.
+docs/*.pdf
+# Generated from the serializers: `manage.py spectacular --file schema.yml`.
+backend/schema.yml
+!docs/PRD_v1_original.pdf
