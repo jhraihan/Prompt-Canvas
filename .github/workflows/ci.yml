@@ -140,7 +140,7 @@ jobs:
         # provider, so no database service and no provider token are needed.
         run: npm run test:e2e
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
