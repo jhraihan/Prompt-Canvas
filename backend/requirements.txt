@@ -4,7 +4,7 @@ djangorestframework-simplejwt==5.5.1
 psycopg[binary]==3.3.4
 django-cors-headers==4.9.0
 django-environ==0.14.0
-huggingface_hub==1.28.0
+huggingface_hub==1.30.0
 pillow==12.3.0
 gunicorn==26.2.0
 whitenoise==6.12.0
