@@ -1,7 +1,7 @@
-Django==6.1
-djangorestframework==3.18.0
+Django==6.1.2
+djangorestframework==3.18.3
 djangorestframework-simplejwt==5.5.1
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.6
 django-cors-headers==4.9.0
 django-environ==0.14.0
 huggingface_hub==1.28.0
